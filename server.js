@@ -1,51 +1,54 @@
 const express = require('express')
-const Database = require('better-sqlite3')
+const sqlite3 = require('sqlite3').verbose()
 const cors = require('cors')
 
 const app = express()
-const db = new Database('tasks.db')
+const db = new sqlite3.Database('tasks.db')
 
 app.use(cors())
 app.use(express.json())
 app.use(express.static('public'))
 
-// Create the tasks table if it doesn't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    completed INTEGER DEFAULT 0
-  )
-`)
+db.run(`CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  completed INTEGER DEFAULT 0
+)`)
 
-// GET all tasks
 app.get('/tasks', (req, res) => {
-  const tasks = db.prepare('SELECT * FROM tasks').all()
-  res.json(tasks)
+  db.all('SELECT * FROM tasks', [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message })
+    res.json(rows)
+  })
 })
 
-// POST a new task
 app.post('/tasks', (req, res) => {
   const { title } = req.body
   if (!title || title.trim() === '') {
     return res.status(400).json({ error: 'Title is required' })
   }
-  const result = db.prepare('INSERT INTO tasks (title) VALUES (?)').run(title.trim())
-  res.json({ id: result.lastInsertRowid, title, completed: 0 })
+  db.run('INSERT INTO tasks (title) VALUES (?)', [title.trim()], function(err) {
+    if (err) return res.status(500).json({ error: err.message })
+    res.json({ id: this.lastID, title, completed: 0 })
+  })
 })
 
-// PUT toggle complete
 app.put('/tasks/:id', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id)
-  if (!task) return res.status(404).json({ error: 'Task not found' })
-  db.prepare('UPDATE tasks SET completed = ? WHERE id = ?').run(task.completed ? 0 : 1, task.id)
-  res.json({ success: true })
+  db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id], (err, task) => {
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    db.run('UPDATE tasks SET completed = ? WHERE id = ?', [task.completed ? 0 : 1, task.id], (err) => {
+      if (err) return res.status(500).json({ error: err.message })
+      res.json({ success: true })
+    })
+  })
 })
 
-// DELETE a task
 app.delete('/tasks/:id', (req, res) => {
-  db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id)
-  res.json({ success: true })
+  db.run('DELETE FROM tasks WHERE id = ?', [req.params.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message })
+    res.json({ success: true })
+  })
 })
 
-app.listen(3000, () => console.log('Server running on http://localhost:3000'))
+const PORT = process.env.PORT || 3000
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`))
